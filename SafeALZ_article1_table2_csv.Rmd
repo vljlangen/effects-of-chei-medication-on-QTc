@@ -1,0 +1,838 @@
+---
+title: "SafeALZ, t-test results"
+author: "The SafeALZ Group"
+output: html_document
+---
+ 
+
+```{r setup, include=FALSE} 
+
+# Load packages
+library(pacman)
+p_load(knitr, dplyr, ggplot2, ggpubr, janitor, flextable, officer)
+
+# Load the dataset
+qtc_valmis <- read.csv("../data/manual_bazetts_qtcs.csv")
+
+
+# Set up necessary general settings
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+ 
+ 
+
+<br>
+<br>
+
+# Comparison: is there a difference between QTc time before and after the initiation of ChE inhibitor treatment?
+
+<br>
+
+We can use the paired t-test to solve this question.
+
+
+
+### SafeALZ: prepare data set (memantine not allowed)
+
+<br>
+
+Let's exclude all memantine users and make a new data set.
+
+<br>
+
+```{r prepare_safealz_dataset}
+ 
+# create a new data set, exclude memantine users
+article1 <- qtc_valmis %>% filter(!mlaake.factor == "memantiini")
+
+# Filter out NA values
+
+article1 <- article1 %>%  filter(!is.na(pre_ekg_qtcaika))
+article1 <- article1 %>%  filter(!is.na(post_ekg_qtcaika))
+
+# confirm no memantine users exist
+prop.table(table(article1$mlaake.factor)) * 100
+
+# tidy up the data set
+article1 <- article1 %>% select(record_id, mlaake.factor, pre_ekg_qtcaika, post_ekg_qtcaika)
+
+# shorten a bit the variable names
+
+article1 <- article1 %>% rename(drug_used = mlaake.factor)
+article1 <- article1 %>% rename(qtc_before = pre_ekg_qtcaika)
+article1 <- article1 %>% rename(qtc_after = post_ekg_qtcaika)
+
+head(article1)
+
+
+article1$drug_used <- as.factor(article1$drug_used)
+
+levels(article1$drug_used)
+
+
+
+# Change labels of factor variable
+
+levels(article1$drug_used)[levels(article1$drug_used) == "donepetsiili"] <- "donepezil"
+levels(article1$drug_used)[levels(article1$drug_used) == "galantamiini"] <- "galantamine"
+levels(article1$drug_used)[levels(article1$drug_used) == "rivastigmiini_tbl"] <- "rivastigmine tablet"
+levels(article1$drug_used)[levels(article1$drug_used) == "rivastigmiini_laast"] <- "rivastigmine skin patch"
+levels(article1$drug_used)[levels(article1$drug_used) == "memantiini"] <- "memantine"
+
+
+# Confirm that the levels are correct
+
+levels(article1$drug_used)
+
+
+# Store the data to new data frame
+
+qtc_data   <-    article1
+
+
+
+```
+
+
+<br>
+<br>
+
+
+### Introduce custom functions to round statistics for tables
+
+<br>
+
+In order to have the exact desired decimal places in the tables, it is worthwhile to use custom functions which enable to round the statistics in a custom way for the tables.
+
+(The code for that is in a hidden code chunk below this line.)
+
+<br>
+
+```{r stylize_statistics, echo=FALSE}
+ 
+# create a custom function that stylizes the statistic values
+
+stylize2 <- function(x) {
+  case_when(
+    x < -0.01 ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+    
+    x >= -0.01 & x <= -0.001 & round_half_up(x, 2) == "-0.01"
+    ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+
+    x >= -0.01 & x <= -0.001 & round_half_up(x, 2) != "-0.01"
+    ~ as.character(format(round_half_up(x, 3), nsmall = 3)),
+
+    x > -0.001 & x < 0 ~ "-<.001",
+    x == 0 ~ "0.00",
+    x >= 0 & x < 0.001 ~ "<.001",
+
+    x >= 0.001 & x < 0.005 ~ as.character(format(round_half_up(x, 3), nsmall = 3)),
+
+    x >= 0.005 ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+    
+    TRUE ~ "other"
+  )
+}
+
+
+stylize1 <- function(x) {
+  case_when(
+    x <= -0.05 ~ as.character(format(round_half_up(x, 1), nsmall = 1)),
+    x < -0.01 & x > -0.05 ~ as.character(format(round_half_up(x, 2), nsmall = 1)),
+    x >= -0.01 & x <= -0.001 & round_half_up(x, 2) == "-0.01"
+    ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+
+    x >= -0.01 & x <= -0.001 & round_half_up(x, 2) != "-0.01"
+    ~ as.character(format(round_half_up(x, 3), nsmall = 3)),
+
+    x > -0.001 & x < 0 ~ "-<.001",
+    x == 0 ~ "0.00",
+    x == -0 ~ "0.00",
+    x >= 0 & x < 0.001 ~ "<.001",
+
+    x >= 0.001 & x < 0.005 ~ as.character(format(round_half_up(x, 3), nsmall = 3)),
+
+    x >= 0.005 & x < 0.05 ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+    x >= 0.05 ~ as.character(format(round_half_up(x, 1), nsmall = 1)),
+    
+    TRUE ~ "other"
+  )
+}
+
+
+
+# create a custom function that stylizes p-values
+#
+# (p-values shall not land at 0.05 sharp)
+
+stylize_p <- function(x) {
+  case_when(
+    x < 0.001 ~ "<.001",
+    x >= 0.001 & x < 0.005 ~ as.character(format(round_half_up(x, 3), nsmall = 3)),
+
+    x >= 0.005 & x < 0.045 ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+    x >= 0.045 & x < 0.055 ~ as.character(format(round_half_up(x, 3), nsmall = 3)),
+    x >= 0.055 ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+    TRUE ~ "other"
+  )
+}
+
+
+```
+
+
+<br>
+<br>
+
+
+<!-- ### Let's produce some random data for drugs and QTc -->
+
+<!-- <br> -->
+
+
+<!-- ```{r random_data} -->
+
+
+<!-- # Set the number of participants -->
+<!-- n_participants <- 50 -->
+
+<!-- # Create a data frame with participant IDs -->
+<!-- qtc_data <- data.frame(participant_id = 1:n_participants) -->
+
+<!-- # Define the drugs -->
+<!-- drugs <- c("donepezil", "memantine", "galantamine", "rivastigmine tablet", "rivastigmine skin patch") -->
+
+<!-- # Generate random data for the drugs used and QTc measurements -->
+<!-- qtc_data$drug_used <- sample(drugs, n_participants, replace = TRUE) -->
+<!-- qtc_data$drug_used <- as.factor(qtc_data$drug_used) -->
+
+<!-- qtc_data$qtc_before <- rnorm(n_participants, mean = 400, sd = 20) -->
+<!-- qtc_data$qtc_after <- rnorm(n_participants, mean = 450, sd = 30) -->
+
+<!-- # View the resulting data frame -->
+<!-- head(qtc_data) -->
+
+<!-- ``` -->
+
+<!-- <br> -->
+<!-- <br> -->
+
+
+
+
+### Exclusion of memantine users
+
+<br>
+
+Let's exclude memantine users.
+
+<br>
+
+```{r exclude_memantine}
+ 
+
+qtc_data <- qtc_data %>% filter(!drug_used == "memantine")
+
+# confirm no memantine users exist
+
+prop.table(table(qtc_data$drug_used)) * 100
+
+
+```
+
+
+<br>
+<br>
+ 
+ 
+ 
+
+
+### T-test results - all ChEIs
+
+<br>
+
+```{r all_AChEIs_t_test}
+ 
+
+# run t-test
+t_test_results <- t.test(qtc_data$qtc_before, qtc_data$qtc_after, paired=TRUE)
+
+# extract p-value
+p_value <- t_test_results$p.value
+
+# extract mean difference
+mean_diff <- t_test_results$estimate[1]
+
+# extract t-value
+t_value <- t_test_results$statistic["t"]
+
+
+# print t-test results
+t_test_results
+
+
+# define n (number of participants)
+
+n <- qtc_data %>% nrow()
+
+# calculate mean for qtc_before
+qtcbefore_mean <- mean(qtc_data$qtc_before)
+
+
+# calculate SD for qtc_before
+qtcbefore_sd <- sd(qtc_data$qtc_before)
+
+
+# calculate mean for qtc_after
+qtcafter_mean <- mean(qtc_data$qtc_after)
+
+#calculate SD for qtc_after
+qtcafter_sd <- sd(qtc_data$qtc_after)
+
+
+#create a tibble of the results
+
+All <- tibble::tribble(
+  
+  ~Group,       ~n, ~qtcbefore_mean, ~qtcbefore_sd, ~qtcafter_mean, ~qtcafter_sd, ~mean_diff, ~t_value,     ~p_value,
+  
+  "All ChEIs",  n,  qtcbefore_mean,  qtcbefore_sd,  qtcafter_mean,  qtcafter_sd,   mean_diff,         t_value,   p_value)
+
+
+All %>% kable()
+
+# destroy the statistics so that they can be run with confidence
+# for the next group in the next chunk
+
+rm(t_test_results, n, qtcbefore_mean, qtcbefore_sd, qtcafter_mean, qtcafter_sd, mean_diff, t_value, p_value)
+
+
+
+```
+
+
+<br>
+<br>
+
+
+
+### T-test results - donepezil
+
+<br>
+
+
+```{r donepezil_t_test}
+
+# select only donepezil users
+done <- qtc_data %>% filter(drug_used == "donepezil")
+
+# confirm that only donepezil users exist
+
+prop.table(table(done$drug_used)) * 100
+
+
+# run t-test
+t_test_results <- t.test(done$qtc_before, done$qtc_after, paired=TRUE)
+
+# extract p-value
+p_value <- t_test_results$p.value
+
+# extract mean difference
+mean_diff <- t_test_results$estimate[1]
+
+# extract t-value
+t_value <- t_test_results$statistic["t"]
+
+# print t-test results
+t_test_results
+
+
+# define n (number of participants)
+
+n <- done %>% nrow()
+
+# calculate mean for qtc_before
+qtcbefore_mean <- mean(done$qtc_before)
+
+# calculate SD for qtc_before
+qtcbefore_sd <- sd(done$qtc_before)
+
+
+# calculate mean for qtc_after
+qtcafter_mean <- mean(done$qtc_after)
+
+#calculate SD for qtc_after
+qtcafter_sd <- sd(done$qtc_after)
+
+
+
+
+#create a tibble of the results
+
+Donepezil <- tibble::tribble(
+  
+  ~Group,       ~n, ~qtcbefore_mean, ~qtcbefore_sd, ~qtcafter_mean, ~qtcafter_sd, ~mean_diff, ~t_value,     ~p_value,
+  "Donepezil",  n,  qtcbefore_mean,  qtcbefore_sd,  qtcafter_mean,  qtcafter_sd,   mean_diff,         t_value,   p_value)
+
+
+Donepezil %>% kable()
+
+
+
+# destroy the statistics so that they can be run with confidence
+# for the next group in the next chunk
+
+rm(t_test_results, n, qtcbefore_mean, qtcbefore_sd, qtcafter_mean, qtcafter_sd, mean_diff, t_value, p_value)
+
+
+
+```
+
+ 
+
+<br>
+<br>
+
+
+
+### T-test results - galantamine
+
+<br>
+
+
+
+
+```{r galantamine_t_test}
+
+# select only galantamine users
+gala <- qtc_data %>% filter(drug_used == "galantamine")
+
+# confirm that only galantamine users exist
+
+prop.table(table(gala$drug_used)) * 100
+
+
+# run t-test
+t_test_results <- t.test(gala$qtc_before, gala$qtc_after, paired=TRUE)
+
+# extract p-value
+p_value <- t_test_results$p.value
+
+# extract mean difference
+mean_diff <- t_test_results$estimate[1]
+
+# extract t-value
+t_value <- t_test_results$statistic["t"]
+
+# print t-test results
+t_test_results
+
+
+# define n (number of participants)
+
+n <- gala %>% nrow()
+
+# calculate mean for qtc_before
+qtcbefore_mean <- mean(gala$qtc_before)
+
+# calculate SD for qtc_before
+qtcbefore_sd <- sd(gala$qtc_before)
+
+
+# calculate mean for qtc_after
+qtcafter_mean <- mean(gala$qtc_after)
+
+#calculate SD for qtc_after
+qtcafter_sd <- sd(gala$qtc_after)
+
+ 
+
+
+#create a tibble of the results
+
+Galantamine <- tibble::tribble(
+  
+  ~Group,       ~n, ~qtcbefore_mean, ~qtcbefore_sd, ~qtcafter_mean, ~qtcafter_sd, ~mean_diff, ~t_value,     ~p_value,
+  "Galantamine",  n,  qtcbefore_mean,  qtcbefore_sd,  qtcafter_mean,  qtcafter_sd,   mean_diff,         t_value,   p_value)
+
+
+Galantamine %>% kable()
+
+
+
+# destroy the statistics so that they can be run with confidence
+# for the next group in the next chunk
+
+rm(t_test_results, n, qtcbefore_mean, qtcbefore_sd, qtcafter_mean, qtcafter_sd, mean_diff, t_value, p_value)
+
+
+
+```
+
+
+
+
+<br>
+<br>
+
+
+
+### T-test results - rivastigmine
+
+<br>
+
+
+
+```{r rivastigmine_t_test}
+
+# select only rivastigmine users
+
+riva <- qtc_data %>% filter(drug_used == "rivastigmine tablet" | drug_used == "rivastigmine skin patch")
+
+# confirm that only rivastigmine users exist
+
+prop.table(table(riva$drug_used)) * 100
+
+
+
+
+
+# run t-test
+t_test_results <- t.test(riva$qtc_before, riva$qtc_after, paired=TRUE)
+
+# extract p-value
+p_value <- t_test_results$p.value
+
+# extract mean difference
+mean_diff <- t_test_results$estimate[1]
+
+# extract t-value
+t_value <- t_test_results$statistic["t"]
+
+# print t-test results
+t_test_results
+
+
+# define n (number of participants)
+
+n <- riva %>% nrow()
+
+# calculate mean for qtc_before
+qtcbefore_mean <- mean(riva$qtc_before)
+
+# calculate SD for qtc_before
+qtcbefore_sd <- sd(riva$qtc_before)
+
+
+# calculate mean for qtc_after
+qtcafter_mean <- mean(riva$qtc_after)
+
+#calculate SD for qtc_after
+qtcafter_sd <- sd(riva$qtc_after)
+
+ 
+
+
+#create a tibble of the results
+
+Rivastigmine <- tibble::tribble(
+  
+  ~Group,       ~n, ~qtcbefore_mean, ~qtcbefore_sd, ~qtcafter_mean, ~qtcafter_sd, ~mean_diff, ~t_value,     ~p_value,
+  "Rivastigmine",  n,  qtcbefore_mean,  qtcbefore_sd,  qtcafter_mean,  qtcafter_sd,   mean_diff,         t_value,   p_value)
+
+
+Rivastigmine %>% kable()
+
+
+
+# destroy the statistics so that they can be run with confidence
+# for the next group in the next chunk
+
+rm(t_test_results, n, qtcbefore_mean, qtcbefore_sd, qtcafter_mean, qtcafter_sd, mean_diff, t_value, p_value)
+
+
+
+```
+
+
+
+
+<br>
+<br>
+
+
+
+### Combine the statistics results for all groups: All, donepezil, galantamine, rivastigmine
+
+<br>
+
+
+
+```{r combine_results}
+
+results <- rbind(All, Donepezil, Galantamine, Rivastigmine)
+
+results
+
+results %>% kable()
+
+
+```
+
+
+
+<br>
+<br>
+
+
+
+### Stylize (round) the statistics
+
+<br>
+
+
+
+```{r stylize_results}
+
+# Apply a function to specific columns of the results
+
+results <- results %>% mutate(across
+                          (qtcbefore_mean:mean_diff, stylize1))
+
+results <- results %>% mutate(t_value = stylize2(t_value))
+
+results <- results %>% mutate(p_value = stylize_p(p_value))
+
+results <- results %>% mutate(n = as.character(n))
+ 
+
+# Verify how results look
+
+results
+
+results %>% kable()
+
+ 
+```
+
+
+
+<br>
+<br>
+
+
+
+### Give the statistics nicer names
+
+<br>
+
+
+
+```{r nicer_names_to_variables}
+
+ 
+results <- results %>% rename(`Mean difference` =  mean_diff,
+                              `t` =  t_value,
+                              `p-value` = p_value)
+    
+
+```
+
+
+
+<br>
+<br>
+
+
+
+### Create a simple flextable of the results
+
+<br>
+
+
+
+```{r simple_qtc_data_flextable}
+
+results %>% flextable()
+
+
+
+
+
+```
+
+
+
+<br>
+<br>
+
+
+
+### Create a more advanced flextable of the results
+
+<br>
+
+
+
+```{r advanced_qtc_data_flextable_take2}
+
+ 
+results2 <- results
+
+
+# Add empty row
+
+emptyrow <- tibble::tribble(
+  
+  ~Group,       ~n, ~qtcbefore_mean, ~qtcbefore_sd, ~qtcafter_mean, ~qtcafter_sd, ~`Mean difference`, ~`t`,     ~`p-value`,
+  "Overall",  "","","","","","","","")
+
+ 
+# Reorder rows
+results2 <- bind_rows(slice(results2, 2:n()), emptyrow, slice(results2, 1))
+
+
+# Create empty column
+
+` ` <- c("","","","","")
+
+` ` <- tibble(` `)
+ 
+
+# Reorder columns
+results2 <- bind_cols(select(results2, 1:4), ` `, select(results2, 5:9))
+
+# Turn the data set into a flextable object
+ft <- flextable(results2)
+
+# First delete the header
+ft <- delete_part(x = ft, part = "header")
+
+# Create new header, 1st row
+ft <- add_header_row(
+  ft,
+  values = c("Group", "n", "Mean", "SD", "", "Mean", "SD", "Mean difference", "t", "p-value"),
+  top = FALSE
+)
+
+# Add a 2nd row of the multilevel header
+ft <- add_header_row(ft,
+                     values = c("", "QTc before medication", "", "QTc during medication", ""),
+                     colwidths = c(2, 2, 1, 2, 3), top = TRUE)
+
+# # Add a 3rd row of the multilevel header
+# ft <- add_header_row(ft, values = c("", "QTc interval", ""),
+#                      colwidths = c(2, 5, 3), top = TRUE)
+# 
+# ft
+
+
+# Add indentation to all rows except to "Overall"
+ft <- ft %>% prepend_chunks(i = ~ Group != "Overall", j = "Group", as_chunk("\t"))
+
+
+# Add theme (this cannot be done later as it messes up with the align commands later on)
+ft <- theme_booktabs(ft)
+
+# Align first 2 columns to left
+ft <- align(ft, j = 1, align = "left", part = "all")
+
+# Align the rest to center
+ft <- align(ft, j = 2:10, align = "center", part = "all")
+
+# Add custom borders under multi-level headers
+#
+# First define define the style of the border line
+border_style = officer::fp_border(color="black", width=1.5)
+
+ft <- hline(ft, part="header", i = 1, j = 3, border = border_style)
+#ft <- hline(ft, part="header", i = 2, j = 3, border = border_style)
+ft <- hline(ft, part="header", i = 1, j = 6, border = border_style)
+
+
+#Squeeze (autofit) the flextable
+ft <- ft %>% autofit()
+
+# Modify column widths
+ft <- width(ft, j=c(3:4, 6:7), width = 1)
+
+# Modify more
+ft <- width(ft, j = ~ ` `, width = 0.001)
+
+# Stylize the p-value to italic
+ft <- mk_par(ft,
+    part = "header", j = "p-value",
+    value = as_paragraph(as_i("p"), "-value")
+  )
+
+# Stylize the t to italic
+ft <- mk_par(ft,
+    part = "header", j = "t",
+    value = as_paragraph(as_i("t"))
+  )
+
+# Stylize the n to italic
+ft <- mk_par(ft,
+    part = "header", j = "n",
+    value = as_paragraph(as_i("n"))
+  )
+
+
+
+#Change the header to bold
+ft <- ft %>%
+  bold(part = "header", bold = TRUE)
+
+#Change the subheaders in column 1 to bold
+ft <- ft %>%
+  bold(j = 1,
+       i = 4,
+       part = "body",
+       bold = TRUE)
+
+#Stylize 1st SD to italic
+ft <- ft %>%
+  italic(j = 4,
+       i = 2,
+       part = "header",
+       italic = TRUE)
+
+#Stylize 2nd SD to italic
+ft <- ft %>%
+  italic(j = 7,
+       i = 2,
+       part = "header",
+       italic = TRUE)
+
+# Add a header
+ft <- ft %>% add_header_lines("Table 2. QTc values measured before and during ChEI medication")
+
+
+# Add a footer
+ft <- ft %>% add_footer_lines(c(
+
+  "QTc, corrected QT interval; ChEI, cholinesterase inhibitor."))
+
+
+# Print the flextable
+ft
+
+# Define the .docx qualities
+
+sect_properties <- prop_section(
+  page_size = page_size(orient = "landscape")
+)
+
+# Save the flextable to docx
+
+ft %>% save_as_docx(path = "table2_csv.docx", pr_section = sect_properties)
+
+```
+
+
+
+<br>
+<br>
+

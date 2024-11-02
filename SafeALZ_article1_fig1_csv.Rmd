@@ -1,0 +1,815 @@
+---
+title: "SafeALZ, t-test results"
+author: "The SafeALZ Group"
+output: html_document
+---
+ 
+
+```{r setup, include=FALSE} 
+
+# Load packages
+library(pacman)
+p_load(knitr, dplyr, ggplot2, ggpubr, gridExtra, cowplot, patchwork, janitor, grid)
+p_load(ggthemes, showtext)
+p_load(animation, magick, pdftools)
+
+# Load the dataset
+qtc_valmis <- read.csv("../data/manual_bazetts_qtcs.csv")
+
+# Set up necessary general settings
+
+knitr::opts_chunk$set(echo = TRUE)
+
+# # Load specific font from Google Fonts
+# font_add_google("Rosario", "google")
+
+# Load specific font from Google Fonts
+font_add_google("Lato", "google")
+
+# Invoke showtext
+showtext_auto()
+
+
+# Name colors
+
+mycolor1 = "#F2D7B2" # "Wheat"
+mycolor2 = "#CFBCD8" # "Lavender grey"
+
+```
+ 
+ 
+
+<br>
+<br>
+
+# Comparison: is there a difference between QTc time before and after the initiation of ChE inhibitor treatment?
+
+<br>
+
+We can use the paired t-test to solve this question.
+
+
+
+
+### SafeALZ: prepare data for graph
+
+<br>
+
+We will now:
+
+1. Choose only the necessary variables for the graphs.
+
+2. Exclude participants with missing data for QTc interval time.
+
+3. "Stack" the data into a "long" format
+
+4. Give variables names that are displayed in the ready graphs.
+
+<br>
+<br>
+
+```{r safealz_prepare_data}
+ 
+
+# Copy the data to a new data frame, select only some variables
+
+qtc_valmis2 <- qtc_valmis %>% select(record_id, mlaake, mlaake.factor, pre_ekg_qtcaika, post_ekg_qtcaika) 
+
+# Filter out NA values
+
+qtc_valmis2 <- qtc_valmis2 %>%  filter(!is.na(pre_ekg_qtcaika))
+qtc_valmis2 <- qtc_valmis2 %>%  filter(!is.na(post_ekg_qtcaika))
+
+# Give variables nicer names
+
+qtc_valmis2 <- qtc_valmis2 %>%  rename(`Before medication` = pre_ekg_qtcaika)
+qtc_valmis2 <- qtc_valmis2 %>%  rename(`During medication` = post_ekg_qtcaika)
+
+# `Before medication` and `During medication` have a slightly curious
+# variable type "labelled integer" which can't be stacked.
+# Fix that first.
+
+qtc_valmis2 <- qtc_valmis2 %>%
+  mutate(`Before medication` = as.numeric(`Before medication`),
+         `During medication` = as.numeric(`During medication`))
+
+
+
+```
+
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+
+
+### Introduce a custom function to round p-value
+
+<br>
+
+(The code for that is in a hidden code chunk below this line.)
+
+<br>
+
+```{r stylize_statistics, echo=FALSE}
+ 
+
+# create a custom function that stylizes p-values
+#
+# (p-values shall not land at 0.05 sharp)
+
+stylize_p <- function(x) {
+  case_when(
+    x < 0.001 ~ "<.001",
+    x >= 0.001 & x < 0.005 ~ as.character(format(round_half_up(x, 3), nsmall = 3)),
+
+    x >= 0.005 & x < 0.045 ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+    x >= 0.045 & x < 0.055 ~ as.character(format(round_half_up(x, 3), nsmall = 3)),
+    x >= 0.055 ~ as.character(format(round_half_up(x, 2), nsmall = 2)),
+    TRUE ~ "other"
+  )
+}
+
+
+```
+
+
+
+
+
+### SafeALZ real data: boxplot + t-test results (all ChEI users)
+
+ 
+<br>
+<br>
+<br>
+<br>
+
+
+```{r all_achei_users_graph, echo=FALSE}
+
+
+
+#################################################################
+##           Filter out users of memantine                     ##
+#################################################################
+
+
+all_acheis <- qtc_valmis2 %>% filter(!mlaake.factor == "memantiini")
+
+n_all <- all_acheis %>% nrow()
+
+n_all
+
+# If wanted, a probability table can be shown to test that users of all
+# medications exist in the data set
+
+prop.table(table(all_acheis$mlaake.factor)) * 100
+
+
+
+#################################################################
+##            Give the plot a title below this text            ##
+#################################################################
+
+title <- paste0("All ChEI users (n=", n_all, ")")
+
+
+
+
+
+
+#################################################################
+##                Stack the data to long format                ##
+#################################################################
+
+
+# Stack the data to a "long" format
+#
+# (The numbers represent the variables that are chosen for this)
+
+all_acheis <- as.data.frame(all_acheis)
+
+stacked_data <- stack(all_acheis[,c("Before medication","During medication")])
+
+
+
+# If wanted, the head and tail of the long form data can be shown
+
+#head(stacked_data)
+#tail(stacked_data)
+
+  
+###########################################################################
+###########################################################################
+###                                                                     ###
+###               BELOW THIS TEXT: THE CODE FOR THE GRAPH               ###
+###                                                                     ###
+###########################################################################
+###########################################################################
+
+
+
+
+# Create the "canvas" for the ggplot; save it to an object called "bp"
+
+bp <- ggplot(stacked_data, aes(x=ind, y=values, fill=ind)) +
+  
+  #ylim(350, 550) +
+  #scale_y_continuous(limits=c(375, 525), breaks = seq(400, 500, by = 25), expand=c(0, 0)) +
+  scale_y_continuous(limits=c(350, 550), expand=c(0,0)) +
+
+  ggtitle(title) +                                  # Add a title to the plot
+  geom_boxplot() +                                  # Draw the boxes
+  theme_classic(base_size = 16, base_family = "google") +  # Classic theme
+  theme(legend.position = "none") +                 # Remove the legend
+  labs(x = "Time point of ECG") +                   # Change the X-axis title
+  labs(y = "QTc interval (ms)") +                   # Change the Y-axis title
+  theme(plot.title = element_text(size = 16, face = "bold")) +     # Title font size
+  theme(axis.text.x = element_text(size = 14)) +    # Increase X-tick label size
+  theme(axis.text.y = element_text(size = 14)) +    # Increase X-tick label size
+
+  theme(axis.title.x = element_text(size = 16,                 # Modify X-axis label
+                                    margin = margin(t = 20),
+                                    face = "bold")) +
+
+  theme(axis.title.y = element_text(size = 16,                 # Modify Y-axis label
+                                    margin = margin(r = 15),
+                                    face = "bold")) +
+
+  theme(axis.text.x = element_text(margin = margin(t = 10))) +  # Set distance for the X-axis tick labels
+  theme(axis.text.y = element_text(margin = margin(r = 5))) +   # Set distance for the Y-axis tick labels
+
+  theme(plot.margin = unit(c(1,1,1,1), "cm")) + # Modify plot margin
+
+   scale_fill_manual(values=c(mycolor1, mycolor2))   # Manual fill colors
+
+
+# Add boxplot to the object "bp"; save the result to an object called "p4"
+
+p4 <- bp + stat_compare_means(
+  method = "t.test",
+  label = "p.format",
+  size = 5,
+  show.legend = FALSE,
+  hide.ns = FALSE,
+  paired = TRUE,
+  comparisons = list(c("Before medication", "During medication")) ,
+  method.args = list(symbol = TRUE)
+)
+
+
+# Change the font of the comparison
+p4$layers[[2]]$aes_params$family <- "google"
+
+
+# Call the object "p4" (essentially: display the graph)
+#p4
+
+
+## Extract data with ggplot_build
+p4build <- ggplot_build(p4)
+
+## Explore build data to find the right variable (here commented out)
+#p4build$data
+
+p_p4 <- p4build$data[[2]]$annotation %>% as.numeric() %>% stylize_p
+
+
+# Replace the p-value with the rounded one
+p4build$data[[2]]$annotation <- paste0("P = ", p_p4)
+
+## plot anew
+plot(ggplot_gtable(p4build))
+
+
+p4 <- ggplot_gtable(p4build)
+
+p4 <- cowplot::ggdraw(p4)
+
+
+
+```
+
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+### SafeALZ real data: boxplot + t-test results (donepezil users)
+
+<br>
+<br>
+<br>
+<br>
+
+```{r donepezil_users_graph, echo=FALSE}
+
+
+
+#################################################################
+##           Filter only users of certain medication           ##
+#################################################################
+
+
+done <- qtc_valmis2 %>% filter(mlaake.factor == "donepetsiili")
+
+n_done <- qtc_valmis2 %>% filter(mlaake.factor == "donepetsiili") %>% nrow()
+
+# If wanted, a probability table can be shown to test that only
+# donepezil users remain
+
+prop.table(table(done$mlaake.factor)) * 100
+
+#################################################################
+##            Give the plot a title below this text            ##
+#################################################################
+
+title <- paste0("Donepezil users (n=", n_done, ")")
+
+
+
+#################################################################
+##                Stack the data to long format                ##
+#################################################################
+
+
+# Stack the data to a "long" format
+#
+# (The numbers represent the variables that are chosen for this)
+
+done <- as.data.frame(done)
+
+stacked_data <- stack(done[,c("Before medication","During medication")])
+
+
+
+# If wanted, the head and tail of the long form data can be shown
+
+#head(stacked_data)
+#tail(stacked_data)
+
+
+###########################################################################
+###########################################################################
+###                                                                     ###
+###               BELOW THIS TEXT: THE CODE FOR THE GRAPH               ###
+###                                                                     ###
+###########################################################################
+###########################################################################
+ 
+
+
+
+# Create the "canvas" for the ggplot; save it to an object called "bp"
+
+bp <- ggplot(stacked_data, aes(x=ind, y=values, fill=ind)) +
+  
+  #ylim(350, 550) +
+  #scale_y_continuous(breaks = seq(400, 500, by = 50)) +
+  scale_y_continuous(limits=c(350, 550), expand=c(0,0)) +
+
+  ggtitle(title) +                                  # Add a title to the plot
+  geom_boxplot() +                                  # Draw the boxes
+  theme_classic(base_size = 16, base_family = "google") +  # Classic theme
+  theme(legend.position = "none") +                 # Remove the legend
+  labs(x = "Time point of ECG") +                   # Change the X-axis title
+  labs(y = "QTc interval (ms)") +                   # Change the Y-axis title
+  theme(plot.title = element_text(size = 16, face = "bold")) +     # Title font size
+  theme(axis.text.x = element_text(size = 14)) +    # Increase X-tick label size
+  theme(axis.text.y = element_text(size = 14)) +    # Increase X-tick label size
+
+  theme(axis.title.x = element_text(size = 16,                 # Modify X-axis label
+                                    margin = margin(t = 20),
+                                    face = "bold")) +
+
+  theme(axis.title.y = element_text(size = 16,                 # Modify Y-axis label
+                                    margin = margin(r = 15),
+                                    face = "bold")) +
+
+  theme(axis.text.x = element_text(margin = margin(t = 10))) +  # Set distance for the X-axis tick labels
+  theme(axis.text.y = element_text(margin = margin(r = 5))) +   # Set distance for the Y-axis tick labels
+
+  theme(plot.margin = unit(c(1,1,1,1), "cm")) + # Modify plot margin
+
+   scale_fill_manual(values=c(mycolor1, mycolor2))   # Manual fill colors
+  
+# Add boxplot to the object "bp"; save the result to an object called "p1"
+
+p1 <- bp + stat_compare_means(
+  method = "t.test",
+  label = "p.format",
+  size = 5,
+  show.legend = FALSE,
+  hide.ns = FALSE,
+  paired = TRUE,
+  comparisons = list(c("Before medication", "During medication")),
+  method.args = list(symbol = TRUE)
+)
+
+
+# Change the font of the comparison
+p1$layers[[2]]$aes_params$family <- "google"
+
+
+# Call the object "p1" (essentially: display the graph)
+
+#p1
+#
+#
+#
+## Extract data with ggplot_build
+ p1build <- ggplot_build(p1)
+#
+## Explore build data to find the right variable (here commented out)
+#p1build$data
+
+p_p1 <- p1build$data[[2]]$annotation %>% as.numeric() %>% stylize_p
+#
+#
+# # Replace the p-value with the rounded one
+p1build$data[[2]]$annotation <- paste0("P = ", p_p1)
+#
+## plot anew
+plot(ggplot_gtable(p1build))
+#
+#
+#
+p1 <- ggplot_gtable(p1build)
+#
+p1 <- cowplot::ggdraw(p1)
+#
+
+
+```
+
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+### SafeALZ real data: boxplot + t-test results (galantamine users)
+
+<br>
+<br>
+<br>
+<br>
+
+```{r galantamine_users_graph, echo=FALSE}
+
+
+
+#################################################################
+##           Filter only users of certain medication           ##
+#################################################################
+
+
+gala <- qtc_valmis2 %>% filter(mlaake.factor == "galantamiini")
+
+n_gala <- qtc_valmis2 %>% filter(mlaake.factor == "galantamiini") %>% nrow()
+
+# If wanted, a probability table can be shown to test that only
+# donepezil users remain
+
+prop.table(table(gala$mlaake.factor)) * 100
+
+#################################################################
+##            Give the plot a title below this text            ##
+#################################################################
+
+title <- paste0("Galantamine users (n=", n_gala, ")")
+
+
+
+#################################################################
+##                Stack the data to long format                ##
+#################################################################
+
+
+# Stack the data to a "long" format
+#
+# (The numbers represent the variables that are chosen for this)
+
+gala <- as.data.frame(gala)
+
+stacked_data <- stack(gala[,c("Before medication","During medication")])
+
+
+
+# If wanted, the head and tail of the long form data can be shown
+
+#head(stacked_data)
+#tail(stacked_data)
+
+
+###########################################################################
+###########################################################################
+###                                                                     ###
+###               BELOW THIS TEXT: THE CODE FOR THE GRAPH               ###
+###                                                                     ###
+###########################################################################
+###########################################################################
+
+ 
+
+
+# Create the "canvas" for the ggplot; save it to an object called "bp"
+
+bp <- ggplot(stacked_data, aes(x=ind, y=values, fill=ind)) +
+
+  #ylim(350, 550) +
+  #scale_y_continuous(breaks = seq(400, 500, by = 50)) +
+  scale_y_continuous(limits=c(350, 550), expand=c(0,0)) +
+
+  ggtitle(title) +                                  # Add a title to the plot
+  geom_boxplot() +                                  # Draw the boxes
+  theme_classic(base_size = 16, base_family = "google") +  # Classic theme
+  theme(legend.position = "none") +                 # Remove the legend
+  labs(x = "Time point of ECG") +                   # Change the X-axis title
+  labs(y = "QTc interval (ms)") +                   # Change the Y-axis title
+  theme(plot.title = element_text(size = 16, face = "bold")) +     # Title font size
+  theme(axis.text.x = element_text(size = 14)) +    # Increase X-tick label size
+  theme(axis.text.y = element_text(size = 14)) +    # Increase X-tick label size
+
+  theme(axis.title.x = element_text(size = 16,                 # Modify X-axis label
+                                    margin = margin(t = 20),
+                                    face = "bold")) +
+
+  theme(axis.title.y = element_text(size = 16,                 # Modify Y-axis label
+                                    margin = margin(r = 15),
+                                    face = "bold")) +
+
+  theme(axis.text.x = element_text(margin = margin(t = 10))) +  # Set distance for the X-axis tick labels
+  theme(axis.text.y = element_text(margin = margin(r = 5))) +   # Set distance for the Y-axis tick labels
+
+  theme(plot.margin = unit(c(1,1,1,1), "cm"))  + # Modify plot margin
+
+ scale_fill_manual(values=c(mycolor1, mycolor2))   # Manual fill colors  
+  
+# Add boxplot to the object "bp"; save the result to an object called "p2"
+
+p2 <- bp + stat_compare_means(
+  method = "t.test",
+  label = "p.format",
+  size = 5,
+  show.legend = FALSE,
+  hide.ns = FALSE,
+  paired = TRUE,
+  comparisons = list(c("Before medication", "During medication")),
+  method.args = list(symbol = TRUE)
+)
+
+
+# Change the font of the comparison
+p2$layers[[2]]$aes_params$family <- "google"
+
+
+# Call the object "p2" (essentially: display the graph)
+
+#p2
+
+
+
+## Extract data with ggplot_build
+p2build <- ggplot_build(p2)
+
+## Explore build data to find the right variable (here commented out)
+#p2build$data
+
+p_p2 <- p2build$data[[2]]$annotation %>% as.numeric() %>% stylize_p
+
+
+# Replace the p-value with the rounded one
+p2build$data[[2]]$annotation <- paste0("P = ", p_p2)
+
+## plot anew
+plot(ggplot_gtable(p2build))
+
+
+
+p2 <- ggplot_gtable(p2build)
+
+p2 <- cowplot::ggdraw(p2)
+
+
+
+```
+
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+
+
+### SafeALZ real data: boxplot + t-test results (rivastigmine users)
+
+<br>
+<br>
+<br>
+<br>
+
+```{r rivastigmine_users_graph, echo=FALSE}
+
+
+#################################################################
+##           Filter only users of certain medication           ##
+#################################################################
+
+
+riva <- qtc_valmis2 %>% filter(mlaake.factor == "rivastigmiini_tbl" | mlaake.factor == "rivastigmiini_laast")
+
+n_riva <- qtc_valmis2 %>% filter(mlaake.factor == "rivastigmiini_tbl"
+                                 | mlaake.factor == "rivastigmiini_laast") %>% nrow()
+
+# If wanted, a probability table can be shown to test that only
+# donepezil users remain
+
+prop.table(table(riva$mlaake.factor)) * 100
+
+
+#################################################################
+##            Give the plot a title below this text            ##
+#################################################################
+
+title <- paste0("Rivastigmine users (n=", n_riva, ")")
+
+
+#################################################################
+##                Stack the data to long format                ##
+#################################################################
+
+
+# Stack the data to a "long" format
+#
+# (The numbers represent the variables that are chosen for this)
+
+riva <- as.data.frame(riva)
+
+stacked_data <- stack(riva[,c("Before medication","During medication")])
+
+
+
+# If wanted, the head and tail of the long form data can be shown
+
+head(stacked_data)
+tail(stacked_data)
+
+
+###########################################################################
+###########################################################################
+###                                                                     ###
+###               BELOW THIS TEXT: THE CODE FOR THE GRAPH               ###
+###                                                                     ###
+###########################################################################
+###########################################################################
+
+
+# Create the "canvas" for the ggplot; save it to an object called "bp"
+
+bp <- ggplot(stacked_data, aes(x=ind, y=values, fill=ind)) +
+
+  #ylim(350, 550) +
+  #scale_y_continuous(breaks = seq(400, 500, by = 50)) +
+  #scale_y_continuous(limits=c(375, 525), breaks = seq(400, 500, by = 25), expand=c(0, 0)) +
+
+  scale_y_continuous(limits=c(350, 550), expand=c(0,0)) +
+
+  ggtitle(title) +                                  # Add a title to the plot
+  geom_boxplot() +                                  # Draw the boxes
+  theme_classic(base_size = 16, base_family = "google") +  # Classic theme
+  theme(legend.position = "none") +                 # Remove the legend
+  labs(x = "Time point of ECG") +                   # Change the X-axis title
+  labs(y = "QTc interval (ms)") +                   # Change the Y-axis title
+  theme(plot.title = element_text(size = 16, face = "bold")) +     # Title font size
+  theme(axis.text.x = element_text(size = 14)) +    # Increase X-tick label size
+  theme(axis.text.y = element_text(size = 14)) +    # Increase X-tick label size
+
+  theme(axis.title.x = element_text(size = 16,                 # Modify X-axis label
+                                    margin = margin(t = 20),
+                                    face = "bold")) +
+
+  theme(axis.title.y = element_text(size = 16,                 # Modify Y-axis label
+                                    margin = margin(r = 15),
+                                    face = "bold")) +
+
+  theme(axis.text.x = element_text(margin = margin(t = 10))) +  # Set distance for the X-axis tick labels
+  theme(axis.text.y = element_text(margin = margin(r = 5))) +   # Set distance for the Y-axis tick labels
+
+  theme(plot.margin = unit(c(1,1,1,1), "cm")) +  # Modify plot margin
+
+ scale_fill_manual(values=c(mycolor1, mycolor2))   # Manual fill colors
+
+
+
+# Add boxplot to the object "bp"; save the result to an object called "p3"
+
+p3 <- bp + stat_compare_means(
+  method = "t.test",
+  label = "p.format",
+  size = 5,
+  show.legend = FALSE,
+  hide.ns = FALSE,
+  paired = TRUE,
+  comparisons = list(c("Before medication", "During medication")),
+  method.args = list(symbol = TRUE)
+)
+
+
+# Call the object "p2" (essentially: display the graph)
+
+#p3
+
+
+# Change the font of the comparison
+p3$layers[[2]]$aes_params$family <- "google"
+
+
+## Extract data with ggplot_build
+p3build <- ggplot_build(p3)
+
+## Explore build data to find the right variable (here commented out)
+#p3build$data
+
+p_p3 <- p3build$data[[2]]$annotation %>% as.numeric() %>% stylize_p
+
+
+# Replace the p-value with the rounded one
+p3build$data[[2]]$annotation <- paste0("P = ", p_p3)
+
+## plot anew
+plot(ggplot_gtable(p3build))
+
+p3 <- ggplot_gtable(p3build)
+
+p3 <- cowplot::ggdraw(p3)
+
+
+```
+
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+
+
+### A panel of all little graphs
+
+<br>
+
+Finally, we can present all little graphs in a panel.
+
+The code below
+
+1. First, creates the panel and saves as a PNG file
+2. Then displays the PNG file
+
+<br>
+
+
+```{r panel, echo=FALSE}
+
+
+
+# Create a panel
+
+grid <- plot_grid(p1, p2, p3, p4, nrow = 2, ncol = 2, scale = 1.0)
+
+
+# When showtext() is used to change font(s), plots have to be saved as pdf files,
+# otherwise proportions get distorted.
+
+
+# Save the panel to a PDF file
+save_plot("fig1.pdf", grid, nrow = 3, ncol = 2)
+
+# Load that pdf file with the magick package
+panel <- magick::image_read_pdf("fig1.pdf")
+
+# Save it as PNG
+image_write(panel, path = "fig1.png", format = "png")
+
+
+```
+
+
+```{r show_panel, echo=FALSE}
+
+# Display the ready panel
+panel
+
+```
+
+

@@ -1,0 +1,425 @@
+---
+title: "SafeALZ, t-test results"
+author: "The SafeALZ Group"
+output: html_document
+---
+ 
+
+```{r setup, include=FALSE} 
+
+# Load packages
+library(pacman)
+p_load(knitr, dplyr, ggplot2, ggpubr, gridExtra, cowplot, patchwork, janitor, grid, survey)
+p_load(ggthemes, showtext)
+p_load(animation, magick, pdftools)
+
+# Load the dataset
+qtc_valmis <- read.csv("../data/manual_bazetts_qtcs.csv")
+
+# Set up necessary general settings
+
+knitr::opts_chunk$set(echo = TRUE)
+
+
+# Load specific font from Google Fonts
+font_add_google("Lato", "google")
+
+# Invoke showtext
+showtext_auto()
+
+
+# Name colors
+
+mycolor1 = "#F2D7B2" # "Wheat"
+mycolor2 = "#CFBCD8" # "Lavender grey"
+
+
+
+
+```
+ 
+ 
+
+<br>
+<br>
+
+# Comparison: is there a difference between the number of participants with pathological QTc before and after the initiation of ChE inhibitor treatment?
+
+<br>
+
+We can use McNemar's test to investigate this.
+
+
+
+
+## Filter out memantine users.
+
+Start by filtering out memantine users.
+
+<br>
+
+```{r filter_out}
+
+# Create a new data set, exclude memantine users
+article1 <- qtc_valmis %>% filter(!mlaake.factor == "memantiini")
+
+# Confirm no memantine users exist
+prop.table(table(article1$mlaake.factor)) * 100
+
+# Filter out NA values
+article1 <- article1 %>%  filter(!is.na(pre_ekg_qtcaika))
+article1 <- article1 %>%  filter(!is.na(post_ekg_qtcaika))
+
+# Confirm everyone has data for QTc (expressed in percentage)
+mean(!is.na(article1$pre_ekg_qtcaika)) * 100
+mean(!is.na(article1$post_ekg_qtcaika)) * 100
+
+
+
+```
+
+
+<br>
+<br>
+
+
+
+
+## Select variables of interest for creating Fig. 2
+
+<br>
+
+```{r select}
+
+
+article1 <- article1 %>% select(
+
+record_id,
+sukupuoli.factor,
+mlaake_aloituspvm,
+mlaake.factor,
+pre_ekg_qtcaika,
+post_ekg_qtcaika
+)
+
+
+
+
+```
+
+
+<br>
+<br>
+
+
+## Define how many have pathological QTc (before medication initiation)
+
+<br>
+
+```{r pathological_qt_before}
+
+# Define sex-specific cutoffs for pathological QTc
+male_cutoff <- 450
+female_cutoff <- 460
+
+# Mutate a new variable indicating pathological QTc
+article1 <- article1 %>%
+  mutate(
+    path_QTc_pre = case_when(
+      sukupuoli.factor == "Mies" & pre_ekg_qtcaika > male_cutoff ~ 1,
+      sukupuoli.factor == "Nainen" & pre_ekg_qtcaika > female_cutoff ~ 1,
+      TRUE ~ 0
+    )
+  )
+
+article1 <- article1 %>%
+  mutate(
+    path_QTc_pre.factor = factor(path_QTc_pre, levels=c(0,1), labels = c("No", "Yes")))
+
+article1 <- article1 %>% select(-path_QTc_pre)
+ 
+
+
+```
+
+
+<br>
+<br>
+
+
+
+## Define how many have pathological QTc (after medication initiation)
+
+<br>
+
+```{r pathological_qt_after}
+
+# Define sex-specific cutoffs for pathological QTc
+male_cutoff <- 450
+female_cutoff <- 460
+
+# Mutate a new variable indicating pathological QTc
+article1 <- article1 %>%
+  mutate(
+    path_QTc_post = case_when(
+      sukupuoli.factor == "Mies" & post_ekg_qtcaika > male_cutoff ~ 1,
+      sukupuoli.factor == "Nainen" & post_ekg_qtcaika > female_cutoff ~ 1,
+      TRUE ~ 0
+    )
+  )
+ 
+article1 <- article1 %>%
+  mutate(
+    path_QTc_post.factor = factor(path_QTc_post, levels=c(0,1),  labels = c("No", "Yes")))
+
+article1 <- article1 %>% select(-path_QTc_post)
+
+
+```
+
+
+<br>
+<br>
+
+
+
+
+## Let's run McNemar's test
+
+Store the p-value to the object `p_value`.
+
+<br>
+
+```{r mcnemar}
+
+# Show the head of the data set
+head(article1, n=14) %>% kable()
+
+# Convert article1 data frame back to classic data frame (rather than a tibble)
+
+article1 <- as.data.frame(article1)
+
+# Run the test
+result <- mcnemar.test(table(article1$path_QTc_pre, article1$path_QTc_post))
+
+# Show the results
+result
+
+# Extract p-value
+p_value <- result$p.value
+
+# Show the p-value
+p_value
+
+```
+
+
+<br>
+<br>
+
+
+
+## For plotting, create probability table
+
+Calculate percentages of pathological QTc (before and during medication) to be displayed in a bar chart.
+
+<br>
+
+```{r prob_table}
+
+# Display the head
+head(article1) %>% kable()
+
+# Create a frequency table
+freq_table_pre <- article1 %>% select(path_QTc_pre.factor) %>% table()
+
+# Turn the frequency table to probability table (percentages)
+prob_table_pre <- freq_table_pre / sum(freq_table_pre) * 100
+
+# Display the probability table
+prob_table_pre     
+
+# Extract the percentage of participants who have pathological QTc 
+pct_paths_pre <- prob_table_pre[2]
+
+# Display the percentage
+pct_paths_pre
+
+
+# Calculate confidence interval with the Clopper-Pearson method
+ci_pre <- binom.test(x = sum(article1$path_QTc_pre.factor == "Yes"), n = length(article1$path_QTc_pre.factor), conf.level = 0.95)$conf.int
+
+ci_pre
+ 
+ci_pre <- ci_pre * 100 
+
+
+
+
+
+
+# Reiterate the commands for post-initiation of ChEI medication
+freq_table_post <- article1 %>% select(path_QTc_post.factor) %>% table()
+prob_table_post <- freq_table_post / sum(freq_table_post) * 100
+prob_table_post     
+pct_paths_post <- prob_table_post[2]
+pct_paths_post
+
+
+
+# Calculate confidence interval with the Clopper-Pearson method
+ci_post <- binom.test(x = sum(article1$path_QTc_post.factor == "Yes"), n = length(article1$path_QTc_post.factor), conf.level = 0.95)$conf.int
+
+ci_post <- ci_post * 100
+
+
+
+
+```
+
+
+<br>
+<br>
+
+
+ 
+ 
+
+
+## Create a data frame for ggplot
+
+`ggplot` requires data in long format.
+
+<br>
+
+```{r data_for_ggplot}
+
+
+data_for_ggplot <- 
+
+tibble::tribble(
+  ~time_point,              ~pct,           ~ci_lower,    ~ci_upper,    
+  "Before ChEI medication", pct_paths_pre,  ci_pre[1],   ci_pre[2],
+  "During ChEI medication", pct_paths_post, ci_post[1],  ci_post[2]
+  )
+
+data_for_ggplot
+
+
+```
+
+
+<br>
+<br>
+
+
+
+## Draw the plot with `ggplot`
+
+<br>
+<br>
+<br>
+<br>
+<br>
+
+```{r ggplot, echo=FALSE}
+
+p <- ggplot(data_for_ggplot, aes(fill = time_point, x = time_point, y = pct)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.6, color = "black") +
+
+  #ylim(0, 100) +
+  
+  scale_y_continuous(limits=c(0, 50), expand=c(0,0)) +
+  
+  labs(x = "", y = "Percentage") +
+  ggtitle("Proportion of participants with abnormal QTc") +
+  theme_classic(base_size = 16, base_family = "google") +  # Classic theme
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14)) +
+
+  #ggtitle(title) +                                  # Add a title to the plot
+ 
+  theme(legend.position = "none") +                 # Remove the legend
+  labs(x = "Time point of ECG") +                   # Change the X-axis title
+  labs(y = "Percentage") +                   # Change the Y-axis title
+  theme(plot.title = element_text(size = 16, face = "bold")) + # Modify title label
+
+  theme(axis.title.x = element_text(size = 16,                 # Modify X-axis label
+                                    margin = margin(t = 20),
+                                    face = "bold")) +
+
+  theme(axis.title.y = element_text(size = 16,                 # Modify Y-axis label
+                                    margin = margin(r = 15),
+                                    face = "bold")) +
+
+  theme(axis.text.x = element_text(margin = margin(t = 10))) +  # Set distance for the X-axis tick labels
+  theme(axis.text.y = element_text(margin = margin(r = 5))) +   # Set distance for the Y-axis tick labels
+  
+
+  geom_signif(                                                  # Insert p-value to plot
+  y_position = 35, xmin = 1, xmax = 2,
+  annotation = paste0("P = ",round(p_value,2)),
+               tip_length = 0.2,
+               textsize = 5
+              ) +
+  
+  
+  geom_errorbar(aes(x=time_point, ymin=ci_lower, ymax=ci_upper), width=0.1, colour="black", alpha=0.9, size=0.5) +
+
+   scale_fill_manual(values=c(mycolor1, mycolor2))   # Manual fill colors
+
+# Display the plot
+
+p
+
+```
+
+
+<br>
+<br>
+
+    
+ 
+
+
+### Save the plot as PNG and PDF 
+
+
+
+<br>
+
+
+```{r save_pdf, echo=FALSE}
+
+
+# When showtext() is used to change font(s), plots have to be saved as pdf files,
+# otherwise proportions get distorted.
+
+
+# Save as png with dpi specified
+ggsave("fig2_dpi600.pdf", p, dpi = 600)
+ 
+# Load that pdf file with the magick package
+pdf_image <- magick::image_read_pdf("fig2_dpi600.pdf")
+
+# Save it as PNG
+image_write(pdf_image, path = "fig2.png", format = "png")
+
+ 
+
+
+```
+
+
+```{r show_png, echo=FALSE}
+
+
+
+# Display the ready panel
+knitr::include_graphics("fig2.png")
+
+
+```
+
+

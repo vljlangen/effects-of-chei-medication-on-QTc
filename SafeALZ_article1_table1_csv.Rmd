@@ -1,0 +1,679 @@
+---
+title: "SafeALZ, Table 1. Characteristics"
+author: "The SafeALZ Group"
+output: html_document
+---
+ 
+
+```{r setup, include=FALSE} 
+
+# Load packages
+library(pacman)
+p_load(knitr, dplyr, flextable, officer, lubridate, forcats, tableone, tibble)
+
+# Load the datasets
+
+# Only the data set "qtc_valmis" is needed
+qtc_valmis <- read.csv("../data/manual_bazetts_qtcs.csv")
+
+# Set up necessary general settings
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+ 
+ 
+
+
+
+<br>
+<br>
+
+
+## Filter out participants with inadequate data
+
+Filter out
+
+1) memantine users
+2) participants with no data for QTc interval time
+
+<br>
+
+```{r filter_out}
+
+qtc_valmis$mlaake.factor <- as.factor(qtc_valmis$mlaake.factor)
+
+# Create a new data set, exclude memantine users
+article1 <- qtc_valmis %>% filter(!mlaake.factor == "memantiini")
+
+# Confirm no memantine users exist
+prop.table(table(article1$mlaake.factor)) * 100
+
+# Filter out NA values
+article1 <- article1 %>%  filter(!is.na(pre_ekg_qtcaika))
+article1 <- article1 %>%  filter(!is.na(post_ekg_qtcaika))
+
+# Confirm everyone has data for QTc (expressed in percentage)
+mean(!is.na(article1$pre_ekg_qtcaika)) * 100
+mean(!is.na(article1$post_ekg_qtcaika)) * 100
+
+
+
+```
+
+
+<br>
+<br>
+
+
+## List all variables in "whole_data" and "qtc_valmis" to select the ones of interest for Table 1
+
+Remove the hashtags from the code to list out all variables.
+
+<br>
+
+```{r list_variables}
+
+# variables_whole_data <- names(whole_data)
+# variables_qtc_valmis <- names(article1)
+# 
+# variables_whole_data %>% kable()
+# 
+# variables_qtc_valmis %>% kable()
+
+```
+
+
+<br>
+<br>
+
+
+## Select variables of interest for creating Table 1
+
+
+```{r select}
+
+
+article1 <- article1 %>% select(
+
+record_id,
+syntym_aika,
+vo_pvm_1,
+sukupuoli.factor,
+mlaake_aloituspvm,
+mlaake.factor,
+pre_ekg_pvm,
+post_ekg_pvm,
+pre_ekg_qtcaika,
+post_ekg_qtcaika,
+
+# Include also the first CERAD-MMSE or the first conventional MMSE
+
+cerad_mmse_1,
+mmse_1
+
+)
+
+
+
+
+```
+
+
+<br>
+<br>
+
+
+
+
+
+
+## Mutate an MMSE variable for tabulating
+
+If the first CERAD-MMSE is available, that will be used - otherwise the 1st conventional MMSE will be used.
+
+
+```{r mutate_MMSE_variable}
+
+
+article1 <- article1 %>% mutate(mmse = ifelse(!is.na(cerad_mmse_1),
+                                              cerad_mmse_1, mmse_1))
+
+
+```
+
+
+<br>
+<br>
+
+
+
+
+
+## Verify that variables of the type date really are in the date format
+
+<br>
+
+```{r verify_date_format}
+
+article1$syntym_aika <- as.Date(article1$syntym_aika)
+
+article1$vo_pvm_1<- as.Date(article1$vo_pvm_1)
+
+article1$mlaake_aloituspvm <- as.Date(article1$mlaake_aloituspvm)
+
+article1$pre_ekg_pvm <- as.Date(article1$pre_ekg_pvm)
+
+article1$post_ekg_pvm <- as.Date(article1$post_ekg_pvm)
+
+
+
+is.Date(article1$syntym_aika)
+
+is.Date(article1$vo_pvm_1)
+
+is.Date(article1$mlaake_aloituspvm)
+
+is.Date(article1$pre_ekg_pvm)
+
+is.Date(article1$post_ekg_pvm)
+
+
+
+```
+
+
+<br>
+<br>
+
+
+
+
+## Calculate the age etc. date-type of variables to publication-ready form (where needed)
+
+<br>
+
+```{r calculate}
+
+# Use time_length() function from lubridate package to calculate the age of the participants
+article1 <- article1 %>% mutate(Age = time_length(vo_pvm_1 - syntym_aika, "years"))
+
+# Calculate also the following times:
+
+#Time from pre ecg to medication initiation
+article1 <- article1 %>% mutate(time_from_ecg_to_drug = time_length(mlaake_aloituspvm - pre_ekg_pvm, "days"))
+
+#Time from medication initiation to post ecg
+
+# code here...
+article1 <- article1 %>% mutate(time_from_drug_to_2nd_ecg = time_length(post_ekg_pvm - mlaake_aloituspvm, "days"))
+
+
+# Test that the codes work; use head() for the new variables
+head(article1$Age)
+head(article1$time_from_ecg_to_drug)
+head(article1$time_from_drug_to_2nd_ecg)
+
+```
+
+
+<br>
+<br>
+
+
+
+
+## Define how many have pathological QTc (before medication initiation)
+
+<br>
+
+```{r pathological_qt_before}
+
+
+# Define sex-specific cutoffs for pathological QTc
+male_cutoff <- 450
+female_cutoff <- 460
+
+
+article1$sukupuoli.factor <- as.factor(article1$sukupuoli.factor)
+
+
+# Mutate a new variable indicating pathological QTc before ChEI initiation
+article1 <- article1 %>%
+  mutate(
+    pathological_QTc_before = case_when(
+      sukupuoli.factor == "Mies" & pre_ekg_qtcaika >= male_cutoff ~ "Yes",
+      sukupuoli.factor == "Nainen" & pre_ekg_qtcaika >= female_cutoff ~ "Yes",
+      TRUE ~ "No"
+    )
+  )
+
+
+
+# Calculate the percentage of participants with pathological QTc before ChEI initiation
+num_pathological_before <- sum(article1$pathological_QTc_before == "Yes")
+num_total <- nrow(article1)
+pct_pathological_before <- num_pathological_before / num_total * 100
+
+# Print the result
+cat(sprintf("Percentage of participants with pathological QTc before ChEI initiation: %.2f%%\n", pct_pathological_before))
+cat(sprintf("Number of participants with pathological QTc before ChEI initiation: %d\n", num_pathological_before))
+
+#show the head of the dataset
+head(article1, n=14) %>% kable ()
+
+
+```
+
+
+<br>
+<br>
+
+
+
+## Define how many have pathological QTc (after medication initiation)
+
+<br>
+
+```{r pathological_qt_after}
+
+# Define sex-specific cutoffs for pathological QTc
+male_cutoff <- 450
+female_cutoff <- 460
+
+# Mutate a new variable indicating pathological QTc during ChEI medication
+article1 <- article1 %>%
+  mutate(
+    pathological_QTc_during = case_when(
+      sukupuoli.factor == "Mies" & post_ekg_qtcaika >= male_cutoff ~ "Yes",
+      sukupuoli.factor == "Nainen" & post_ekg_qtcaika >= female_cutoff ~ "Yes",
+      TRUE ~ "No"
+    )
+  )
+
+# Calculate the percentage of participants with pathological QTc during ChEI medication
+num_pathological_during <- sum(article1$pathological_QTc_during == "Yes")
+num_total <- nrow(article1)
+pct_pathological_during <- num_pathological_during / num_total * 100
+
+# Print the result
+cat(sprintf("Percentage of participants with pathological QTc after ChEI initiation: %.2f%%\n", pct_pathological_during))
+cat(sprintf("Number of participants with pathological QTc after ChEI initiation: %d\n", num_pathological_during))
+
+#show the head of the dataset
+head(article1, n=14) %>% kable()
+
+
+```
+
+
+<br>
+<br>
+
+
+
+
+## Rename the levels of the factor variables indicating ChEI usage 
+
+<br>
+
+```{r rename_levels}
+ 
+ 
+levels(article1$mlaake.factor)
+
+
+# Change labels of factor variable
+
+levels(article1$mlaake.factor)[levels(article1$mlaake.factor) == "donepetsiili"] <- "Donepezil"
+levels(article1$mlaake.factor)[levels(article1$mlaake.factor) == "galantamiini"] <- "Galantamine"
+levels(article1$mlaake.factor)[levels(article1$mlaake.factor) == "rivastigmiini_tbl"] <- "Rivastigmine tablet"
+levels(article1$mlaake.factor)[levels(article1$mlaake.factor) == "rivastigmiini_laast"] <- "Rivastigmine skin patch"
+levels(article1$mlaake.factor)[levels(article1$mlaake.factor) == "memantiini"] <- "Memantine"
+
+
+# Confirm that the levels are correct
+
+levels(article1$mlaake.factor)
+
+
+
+
+
+
+```
+
+
+
+<br>
+<br>
+ 
+ 
+ 
+
+
+
+## Rename the variables as they should appear in the table. 
+
+<br>
+
+
+```{r rename}
+
+article1 <- article1 %>%
+  rename(
+        `Women` = sukupuoli.factor,
+        `Age, years` = Age,
+        `ChEI medication` = mlaake.factor,
+        `Time from 1st ECG to initiation of ChEI, days` = time_from_ecg_to_drug,
+        `Time from ChEI initiation to 2nd ECG, days` = time_from_drug_to_2nd_ecg,
+        `QTc interval before ChEI, ms` = pre_ekg_qtcaika,
+        `QTc interval after initiation of ChEI, ms` = post_ekg_qtcaika,
+        `Mini-Mental State Examination` = mmse,
+        `Pathological QTc before ChEI` = pathological_QTc_before,
+        `Pathological QTc during ChEI` = pathological_QTc_during
+        )
+
+head(article1)
+
+
+```
+
+
+
+<br>
+<br>
+ 
+ 
+ 
+ 
+ 
+ 
+
+ 
+ 
+ 
+## Select variables for `tableone` - also tell tableone which variables are continuous and which categorical
+
+<br>
+
+
+```{r variables_for_tableone}
+
+# The names of all variables of interest
+all_vars <- article1 %>% select(
+      
+                                `Age, years`,
+                                `Women`,
+                                `Mini-Mental State Examination`,
+                                `ChEI medication`,
+                                `Time from 1st ECG to initiation of ChEI, days`,
+                                `Time from ChEI initiation to 2nd ECG, days`,
+                                `QTc interval before ChEI, ms`,
+                                `QTc interval after initiation of ChEI, ms`,
+                                `Pathological QTc before ChEI`,
+                                `Pathological QTc during ChEI`
+                                ) %>%
+  
+                                names()
+
+# The names of the categorical variables (of interest)
+categorical_vars <- article1 %>% select(
+                                  `Women`,
+                                  `ChEI medication`) %>%
+  
+                                 names()
+
+
+# Test that the names() caught the names correctly
+all_vars
+categorical_vars
+
+```
+
+
+<br>
+<br>
+ 
+ 
+## Create Table 1 object
+
+<br>
+
+```{r create_tableone}
+
+table1 <-  CreateTableOne(data = article1,
+                              vars = all_vars,
+                              factorVars = categorical_vars)
+
+table1
+
+table1_printed <- print(table1,
+quote = F,
+noSpaces = T,
+test = F,
+contDigits = 1,
+printToggle = F,
+dropEqual = T,
+explain = T)
+
+table1_printed
+
+
+table1_printed <- table1_printed %>% as.data.frame() %>% rownames_to_column(var = "Variable")
+
+
+```
+
+
+<br>
+<br>
+
+
+## Tweak the table style "à la Ville"
+
+The table should read
+
+1. All patients (N=X) as the header of the 2nd column
+2. No statistics symbols (SD etc.) on the 1st column
+3. Sex should be indicated simply as "Women", not "Sex, male" or "Sex, male/women" or anything like that
+
+### Part 1
+
+1. Transfer the percentage symbols from 1st column to the second
+2. Erase percentage, SD etc. symbols from the 1st column (they are too heavy to read)
+
+<br>
+
+```{r a_la_ville_part1}
+
+# 1. Transfer the percentage symbols from 1st column to the second
+ 
+# Loop through the rows
+for (i in seq_len(nrow(table1_printed))) {
+  
+  # If row ends with "(SD))"
+  if (grepl("\\(SD\\)\\)$", table1_printed[i, 1])) {
+    # Skip the row
+    next
+  }
+  
+  # Otherwise, update the second column
+  table1_printed[i, 2] <- sub("\\)$", "%)", table1_printed[i, 2])
+}
+ 
+
+# 2. Erase percentage, SD etc. symbols from the 1st column (they are too heavy to read)
+
+# Remove " (mean (SD))" and " (%)"
+# Remove " (mean (SD))" and " (%)"
+table1_printed[,1] <- sub(" \\(mean \\(SD\\)\\)$", "", table1_printed[,1])
+table1_printed[,1] <- sub(" \\(%)$", "", table1_printed[,1])
+
+
+table1_printed
+
+```
+
+
+<br>
+<br>
+
+
+### Part 2
+
+1. Change the 2nd column of the header to "All patients (n=X)" (instead of "Overall")
+2. Remove the "n=X" row
+
+<br>
+
+```{r a_la_ville_part2}
+
+# Header (2nd column) should read "All patients (n=X)", not overall
+
+# The n=X row should thus be deleted
+
+# 1. Identify the row that has the value "n" in the first column
+row_index <- which(table1_printed[, 1] == "n")
+
+# 2. Save the value of the second column of that row in a new object n_number
+n_number <- table1_printed[row_index, 2]
+
+# 3. Remove the row with the value "n" from the data frame
+table1_printed <- table1_printed[-row_index, ]
+
+# 4. Define a new text for the 2nd column of the header
+
+new_col2_name = paste0("All patients (N = ", n_number, ")")
+
+new_col2_name
+
+# 5. Assign the names with curly brackets and the `:=` operator
+
+table1_printed <- table1_printed %>% rename({{new_col2_name}} := Overall)
+
+
+table1_printed
+
+# Create a backup of table1_printed
+
+backup <- table1_printed
+
+# Add range of MMSE
+
+min_mmse <- min(article1$`Mini-Mental State Examination`)
+max_mmse <- max(article1$`Mini-Mental State Examination`)
+
+# Create range
+range_mmse <- paste0(min_mmse, '–' ,max_mmse)
+
+
+
+# Substitute the original cell value in such a way that range is included
+
+table1_printed[3,2] <- paste0(table1_printed[3,2], " (range: ", range_mmse, ")")
+
+table1_printed
+
+
+# # Alternative version (new row)
+# # Use slice
+# first_part <- table1_printed %>% slice(1:3)
+# second_part <- table1_printed %>% slice(4:9)
+# 
+# # Create new row
+# range_printed <- paste0("(Range: ", range_mmse, ")")
+# new_row <- tibble(Variable = "", `All patients (N = 126)` = range_printed)
+# 
+# # Combine the rows
+# ready_table <- rbind(first_part, new_row, second_part)
+# table1_printed <- ready_table
+
+
+
+
+```
+
+
+<br>
+<br>
+
+
+
+
+## Turn the Table 1 object into a flextable object
+
+<br>
+
+```{r turn_into_flextable}
+
+
+ft <- table1_printed %>%  flextable() %>% autofit()
+
+
+# Add theme (this cannot be done later as it messes up with the align commands later on)
+ft <- theme_booktabs(ft)
+
+# Align first 2 columns to left
+ft <- align(ft, j = 1, align = "left", part = "all")
+
+# Align the rest to center
+ft <- align(ft, j = 2, align = "center", part = "all")
+
+
+#Change the header to bold
+ft <- ft %>%
+  bold(part = "header", bold = TRUE)
+
+# Add a header
+ft <- ft %>% add_header_lines("Table 1. Characteristics of patients treated with ChEI medication in memory clinic")
+
+
+# Add a footer
+ft <- ft %>% add_footer_lines(c(
+  
+"Values are means (and standard deviations) for continuous data and numbers (and percentages) for categorical data, unless otherwise noted. Pathological QTc defined as ≥450 ms for male and ≥460 ms for female participants.",
+
+"ChEI, cholinesterase inhibitor; QTc, corrected QT interval; ECG, electrocardiogram."))
+
+
+```
+
+<br>
+<br>
+
+
+
+## Save the resulting table as .docx (and .png)
+
+Save the table as .docx and .png and display the table (as .png).
+
+
+```{r save_as_docx}
+
+# Save as word .docx
+save_as_docx(ft, path = "table1_csv.docx",
+pr_section =
+prop_section(page_size = page_size(orient = "landscape"),
+type = "continuous"))
+
+# Save the table as image (useful for viewing the table within this R Markdown document)
+
+#save_as_image(ft, "table1.png")
+
+
+```
+
+
+```{r show_table_as_png, echo=FALSE}
+
+
+# Display the ready panel
+#knitr::include_graphics("table1.png")
+
+
+```
+
+
+
+
+
