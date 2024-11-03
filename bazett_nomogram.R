@@ -35,7 +35,7 @@ data1 <- readRDS("data/manual_bazetts_qtcs.rds")
 
 data1 <- data1 %>% filter(!mlaake.factor == "memantiini")
 
-# Apply Bazett’s correction
+# Mutate a gender variable
 data1 <- data1 %>%
   mutate(
     gender = ifelse(sukupuoli == 1, "Male", "Female") # Create a gender column with descriptive labels
